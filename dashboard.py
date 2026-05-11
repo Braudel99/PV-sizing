@@ -1,59 +1,99 @@
-# dashboard.py — Tableau de bord : KPIs, alertes, graphes
+# dashboard.py — Tableau de bord  (v1.2)
 import streamlit as st
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import numpy as np
 from engines import calc_battery_profile
 
-# ── Palette graphes — sobre et lisible ───────────────────────────────────────
-# Toutes les couleurs sont désaturées pour ne pas agresser l'œil
-C_PV      = "#7EB8A4"   # vert sauge doux   — production PV
-C_LOAD    = "#7A9FC2"   # bleu acier doux   — consommation
-C_BAT_CH  = "#9DB87A"   # vert olive        — charge batterie
-C_BAT_DC  = "#9E8FC2"   # mauve doux        — décharge batterie
-C_SOC     = "#A8C4D4"   # bleu pâle         — état de charge
-C_UNCOV   = "#C0504A"   # rouge brique mat  — zones non couvertes (intentionnellement plus vif pour alerter)
+# Palette graphes — cohérente et sobre
+C_PV     = "#6BAED6"   # bleu ciel      — production PV
+C_LOAD   = "#FD8D3C"   # orange doux    — consommation
+C_BAT_CH = "#74C476"   # vert doux      — charge batterie
+C_BAT_DC = "#9E9AC8"   # mauve doux     — décharge batterie
+C_SOC    = "#41B6C4"   # cyan           — état de charge
+C_UNCOV  = "#CB181D"   # rouge vif      — non couvert (intentionnel)
+C_COVER  = "#238B45"   # vert foncé     — couvert
 
 
 def render_alerts(alerts: list):
     for level, msg in alerts:
-        if level == "error":
-            st.error(msg)
-        elif level == "warning":
-            st.warning(msg)
-        elif level == "success":
-            st.success(msg)
-        else:
-            st.info(msg)
+        if level == "error":   st.error(msg)
+        elif level == "warning": st.warning(msg)
+        elif level == "success": st.success(msg)
+        else:                    st.info(msg)
 
 
-def render_kpis(results: dict, ACCENT: str = "#7B9ED4"):
+def render_kpis(results: dict, ACCENT: str = "#7B9ED4", TEXT2: str = "#7A8299"):
     cov = results["coverage"]
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("☀️ Production PV",
-              f"{results['pv']['daily_energy']:.0f} Wh/j",
-              f"{results['pv']['peak_power']} Wc")
-    c2.metric("⚡ Consommation",
-              f"{results['load']['daily_energy']:.0f} Wh/j",
-              f"Pointe {results['load']['peak_power']:.0f} W")
-    c3.metric("🔋 Autonomie",
-              f"{results['battery']['autonomy']:.1f} j",
-              f"{results['battery']['usable_wh']:.0f} Wh utiles")
-    c4.metric("📊 Couverture",
-              f"{cov:.0f} %",
-              "Suffisant" if cov >= 100 else ("Correct" if cov >= 80 else "Insuffisant"),
-              delta_color="normal" if cov >= 80 else "inverse")
+
+    c1.metric(
+        "☀️ Production PV",
+        f"{results['pv']['daily_energy']:.0f} Wh/j",
+        f"{results['pv']['peak_power']} Wc installés",
+    )
+    c2.metric(
+        "⚡ Consommation",
+        f"{results['load']['daily_energy']:.0f} Wh/j",
+        f"Pointe {results['load']['peak_power']:.0f} W",
+    )
+    c3.metric(
+        "🔋 Autonomie réelle",
+        f"{results['battery']['autonomy']:.1f} j",
+        f"{results['battery']['usable_wh']:.0f} Wh utiles",
+    )
+    # Couverture avec couleur dynamique via delta_color
+    cov_label = "✓ Suffisant" if cov >= 100 else ("~ Correct" if cov >= 80 else "✗ Insuffisant")
+    c4.metric(
+        "📊 Couverture solaire",
+        f"{min(cov, 150):.0f} %",
+        cov_label,
+        delta_color="normal" if cov >= 80 else "inverse",
+    )
+
+
+def render_coverage_gauge(coverage: float, dark_mode: bool, TEXT2: str):
+    """Jauge circulaire du taux de couverture."""
+    cov_clamped = min(coverage, 150)
+    if coverage >= 100:
+        bar_color, title_color = C_BAT_CH, C_BAT_CH
+    elif coverage >= 80:
+        bar_color, title_color = "#FD8D3C", "#FD8D3C"
+    else:
+        bar_color, title_color = C_UNCOV, C_UNCOV
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=cov_clamped,
+        number={"suffix": "%", "font": {"size": 28, "color": title_color, "family": "IBM Plex Mono"}},
+        delta={"reference": 100, "suffix": "%",
+               "increasing": {"color": C_BAT_CH}, "decreasing": {"color": C_UNCOV}},
+        gauge={
+            "axis": {"range": [0, 150], "tickwidth": 1, "tickcolor": TEXT2,
+                     "tickvals": [0, 50, 80, 100, 120, 150],
+                     "ticktext": ["0%","50%","80%","100%","120%","150%"]},
+            "bar":  {"color": bar_color, "thickness": 0.22},
+            "bgcolor": "rgba(0,0,0,0)",
+            "steps": [
+                {"range": [0, 80],   "color": "rgba(203,24,29,0.12)"},
+                {"range": [80, 100], "color": "rgba(253,141,60,0.12)"},
+                {"range": [100,150], "color": "rgba(116,196,118,0.12)"},
+            ],
+            "threshold": {"line": {"color": TEXT2, "width": 2}, "thickness": 0.75, "value": 100},
+        },
+        title={"text": "Couverture solaire", "font": {"size": 12, "color": TEXT2}},
+    ))
+    fig.update_layout(
+        height=200,
+        margin=dict(t=40, b=10, l=20, r=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color=TEXT2),
+    )
+    return fig
 
 
 def render_energy_24h(results: dict, dark_mode: bool = True):
-    """
-    Graphe 24h principal.
-    - Aire verte douce   : production PV
-    - Aire bleue douce   : consommation
-    - Zones rouges       : heures non couvertes (fond coloré + annotation)
-    - Barres olive       : surplus stocké en batterie
-    - Barres mauves      : décharge batterie
-    - Ligne bleu pâle    : état de charge (axe droit)
-    """
+    """Graphe 24h avec zones non couvertes clairement marquées en rouge."""
     pv_h   = results["pv"]["hourly_profile"]
     load_h = results["load"]["hourly_profile"]
     usable = results["battery"]["usable_wh"]
@@ -61,171 +101,115 @@ def render_energy_24h(results: dict, dark_mode: bool = True):
     bp    = calc_battery_profile(pv_h, load_h, usable)
     hours = list(range(24))
 
-    grid_c  = "rgba(255,255,255,0.07)" if dark_mode else "rgba(0,0,0,0.06)"
-    font_c  = "#7A8299" if dark_mode else "#6B7186"
-    bg_c    = "rgba(0,0,0,0)"
+    grid_c = "rgba(255,255,255,0.07)" if dark_mode else "rgba(0,0,0,0.06)"
+    font_c = "#7A8299" if dark_mode else "#6B7186"
 
     fig = go.Figure()
 
-    # ── Zones non couvertes : fond rouge par plage horaire ───────────────────
-    uncov = list(bp["uncovered"])
+    # ── Fond rouge sur les heures non couvertes ──────────────────────────────
+    uncov       = list(bp["uncovered"])
     uncov_hours = [h for h, v in enumerate(uncov) if v > 0]
+    for h in uncov_hours:
+        fig.add_vrect(x0=h - 0.5, x1=h + 0.5,
+                      fillcolor="rgba(203,24,29,0.14)", layer="below", line_width=0)
 
-    if uncov_hours:
-        # Fond rouge transparent pour chaque heure non couverte
-        for h in uncov_hours:
-            fig.add_vrect(
-                x0=h - 0.5, x1=h + 0.5,
-                fillcolor="rgba(192, 80, 74, 0.18)",
-                layer="below",
-                line_width=0,
-            )
-        # Barre rouge pleine pour quantifier l'énergie manquante
+    # ── Barres empilées dans cet ordre : non couvert / décharge / charge bat ──
+    if any(v > 0 for v in uncov):
         fig.add_trace(go.Bar(
-            x=hours, y=uncov,
-            name="⚠ Énergie non couverte",
-            marker=dict(
-                color=C_UNCOV,
-                opacity=0.85,
-                line=dict(color=C_UNCOV, width=0),
-            ),
-            hovertemplate="<b>%{y:.1f} Wh</b> non couverts<extra>%{x}h</extra>",
+            x=hours, y=uncov, name="⛔ Non couvert",
+            marker=dict(color=C_UNCOV, opacity=0.9),
+            hovertemplate="<b>%{y:.1f} Wh</b> manquants<extra>%{x}h</extra>",
         ))
 
-    # ── Décharge batterie ────────────────────────────────────────────────────
     discharge = list(bp["discharge"])
     if any(v > 0 for v in discharge):
         fig.add_trace(go.Bar(
-            x=hours, y=discharge,
-            name="Décharge batterie",
-            marker=dict(color=C_BAT_DC, opacity=0.7),
-            hovertemplate="%{y:.1f} Wh<extra>Décharge batterie</extra>",
+            x=hours, y=discharge, name="Décharge batterie",
+            marker=dict(color=C_BAT_DC, opacity=0.75),
+            hovertemplate="%{y:.1f} Wh déchargés<extra>%{x}h</extra>",
         ))
 
-    # ── Charge batterie ──────────────────────────────────────────────────────
     charge_b = list(bp["charge_bat"])
     if any(v > 0 for v in charge_b):
         fig.add_trace(go.Bar(
-            x=hours, y=charge_b,
-            name="Charge batterie",
-            marker=dict(color=C_BAT_CH, opacity=0.7),
-            hovertemplate="%{y:.1f} Wh<extra>Charge batterie</extra>",
+            x=hours, y=charge_b, name="Charge batterie",
+            marker=dict(color=C_BAT_CH, opacity=0.75),
+            hovertemplate="%{y:.1f} Wh stockés<extra>%{x}h</extra>",
         ))
 
-    # ── Aire production PV ───────────────────────────────────────────────────
+    # ── Courbe PV ─────────────────────────────────────────────────────────────
     fig.add_trace(go.Scatter(
-        x=hours, y=list(pv_h),
-        name="Production PV",
-        fill="tozeroy",
-        fillcolor="rgba(126,184,164,0.20)",
-        line=dict(color=C_PV, width=2),
+        x=hours, y=list(pv_h), name="Production PV",
+        fill="tozeroy", fillcolor="rgba(107,174,214,0.18)",
+        line=dict(color=C_PV, width=2.5),
         mode="lines",
         hovertemplate="%{y:.1f} Wh<extra>Production PV</extra>",
     ))
 
-    # ── Ligne consommation ───────────────────────────────────────────────────
+    # ── Courbe consommation ───────────────────────────────────────────────────
     fig.add_trace(go.Scatter(
-        x=hours, y=list(load_h),
-        name="Consommation",
-        fill="tozeroy",
-        fillcolor="rgba(122,159,194,0.12)",
-        line=dict(color=C_LOAD, width=2, dash="dot"),
+        x=hours, y=list(load_h), name="Consommation",
+        fill="tozeroy", fillcolor="rgba(253,141,60,0.10)",
+        line=dict(color=C_LOAD, width=2.5, dash="dot"),
         mode="lines",
         hovertemplate="%{y:.1f} Wh<extra>Consommation</extra>",
     ))
 
-    # ── État de charge — axe secondaire ─────────────────────────────────────
+    # ── État de charge — axe secondaire ──────────────────────────────────────
     soc_pct = [v / usable * 100 if usable > 0 else 0 for v in bp["soc"]]
     fig.add_trace(go.Scatter(
-        x=hours, y=soc_pct,
-        name="État de charge (%)",
-        line=dict(color=C_SOC, width=1.8, dash="dashdot"),
-        mode="lines+markers",
-        marker=dict(size=3.5, color=C_SOC),
+        x=hours, y=soc_pct, name="SoC batterie (%)",
+        line=dict(color=C_SOC, width=2, dash="dashdot"),
+        mode="lines+markers", marker=dict(size=3.5, color=C_SOC),
         yaxis="y2",
-        hovertemplate="%{y:.0f}%<extra>État de charge</extra>",
+        hovertemplate="%{y:.0f}%<extra>SoC batterie</extra>",
     ))
 
-    # ── Annotation si aucune zone non couverte ───────────────────────────────
-    annotations = []
-    if not uncov_hours:
-        annotations.append(dict(
-            x=0.5, y=1.06, xref="paper", yref="paper",
-            text="✓ Toutes les heures sont couvertes",
-            showarrow=False,
-            font=dict(size=11, color="#9DB87A"),
-            xanchor="center",
-        ))
+    # ── Annotation résumé ─────────────────────────────────────────────────────
+    if uncov_hours:
+        txt = f"⛔ {len(uncov_hours)} h non couvertes · déficit {sum(uncov):.0f} Wh"
+        col = C_UNCOV
     else:
-        total_uncov = sum(uncov)
-        annotations.append(dict(
-            x=0.5, y=1.06, xref="paper", yref="paper",
-            text=f"⚠ {len(uncov_hours)} heure(s) non couverte(s) — {total_uncov:.0f} Wh de déficit",
-            showarrow=False,
-            font=dict(size=11, color=C_UNCOV),
-            xanchor="center",
-        ))
+        txt = "✓ Toutes les heures sont couvertes"
+        col = C_BAT_CH
 
     fig.update_layout(
-        title=dict(
-            text="Profil énergétique sur 24 heures",
-            font=dict(size=14, color=font_c),
-            x=0.5, xanchor="center", y=0.97,
-        ),
-        annotations=annotations,
+        annotations=[dict(
+            x=0.5, y=1.07, xref="paper", yref="paper",
+            text=txt, showarrow=False,
+            font=dict(size=12, color=col), xanchor="center",
+        )],
+        title=dict(text="Profil énergétique sur 24 heures",
+                   font=dict(size=14, color=font_c), x=0.5, y=0.97),
         xaxis=dict(
-            title="Heure",
-            tickvals=list(range(0, 24, 2)),
+            title="Heure", tickvals=list(range(0, 24, 2)),
             ticktext=[f"{h:02d}h" for h in range(0, 24, 2)],
-            gridcolor=grid_c,
-            color=font_c,
-            range=[-0.5, 23.5],
+            gridcolor=grid_c, color=font_c, range=[-0.5, 23.5],
         ),
-        yaxis=dict(
-            title="Énergie (Wh)",
-            gridcolor=grid_c,
-            color=font_c,
-            zeroline=True,
-            zerolinecolor=grid_c,
-            rangemode="tozero",
-        ),
-        yaxis2=dict(
-            title="SoC (%)",
-            overlaying="y",
-            side="right",
-            range=[0, 115],
-            showgrid=False,
-            ticksuffix="%",
-            color=font_c,
-        ),
+        yaxis=dict(title="Énergie (Wh)", gridcolor=grid_c, color=font_c,
+                   zeroline=True, zerolinecolor=grid_c, rangemode="tozero"),
+        yaxis2=dict(title="SoC (%)", overlaying="y", side="right",
+                    range=[0, 115], showgrid=False, ticksuffix="%", color=font_c),
         barmode="overlay",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom", y=1.09,
-            xanchor="left", x=0,
-            font=dict(size=10, color=font_c),
-            bgcolor="rgba(0,0,0,0)",
-        ),
-        plot_bgcolor=bg_c,
-        paper_bgcolor=bg_c,
+        legend=dict(orientation="h", yanchor="bottom", y=1.10, xanchor="left", x=0,
+                    font=dict(size=10, color=font_c), bgcolor="rgba(0,0,0,0)"),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color=font_c, size=11),
-        margin=dict(t=100, b=48, l=58, r=64),
-        height=440,
+        margin=dict(t=105, b=48, l=58, r=64),
+        height=450,
         hovermode="x unified",
     )
-
     st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("ℹ️ Lire ce graphe"):
         st.markdown(
-            "| Élément | Signification |\n"
-            "|---|---|\n"
-            "| **Fond rouge + barres rouges** | Heures non couvertes — ni PV ni batterie suffisants |\n"
-            "| **Aire verte** | Production horaire PV (cloche centrée à midi) |\n"
-            "| **Ligne bleue pointillée** | Consommation horaire des appareils (6h–22h) |\n"
-            "| **Barres olive** | Surplus PV stocké dans la batterie |\n"
-            "| **Barres mauves** | Énergie soutirée de la batterie pour compenser le déficit |\n"
-            "| **Ligne bleue pâle** *(axe droit)* | État de charge batterie (0 = vide · 100 = pleine) |"
+            "| Élément | Signification |\n|---|---|\n"
+            "| 🔴 **Fond rouge + barres rouges** | Heures non couvertes — ni PV ni batterie disponible |\n"
+            "| 🔵 **Aire bleue** | Production horaire PV (courbe en cloche, pic à midi) |\n"
+            "| 🟠 **Ligne orange pointillée** | Consommation horaire des appareils |\n"
+            "| 🟢 **Barres vertes** | Surplus PV stocké dans la batterie |\n"
+            "| 🟣 **Barres mauves** | Énergie soutirée de la batterie pour compenser le déficit |\n"
+            "| 🩵 **Ligne cyan** *(axe droit)* | État de charge batterie (0 % = vide · 100 % = pleine) |"
         )
 
 
@@ -233,6 +217,7 @@ def render_balance_bars(results: dict, dark_mode: bool = True):
     font_c = "#7A8299" if dark_mode else "#6B7186"
     grid_c = "rgba(255,255,255,0.07)" if dark_mode else "rgba(0,0,0,0.06)"
 
+    # Graphe côte à côte : production vs consommation + stockage
     labels = ["Production PV", "Consommation", "Stockage utile", "Pertes onduleur"]
     values = [
         results["pv"]["daily_energy"],
@@ -243,40 +228,34 @@ def render_balance_bars(results: dict, dark_mode: bool = True):
     colors = [C_PV, C_LOAD, C_BAT_CH, C_UNCOV]
 
     fig = go.Figure(go.Bar(
-        x=values, y=labels,
-        orientation="h",
-        marker_color=colors,
-        marker_opacity=0.85,
+        x=values, y=labels, orientation="h",
+        marker_color=colors, marker_opacity=0.85,
         text=[f"{v:.0f} Wh" for v in values],
         textposition="outside",
         textfont=dict(color=font_c, size=11),
         hovertemplate="%{x:.0f} Wh<extra>%{y}</extra>",
     ))
     fig.update_layout(
-        title=dict(text="Bilan journalier", font=dict(size=13, color=font_c), x=0.5, xanchor="center"),
+        title=dict(text="Bilan énergétique journalier",
+                   font=dict(size=13, color=font_c), x=0.5, xanchor="center"),
         xaxis=dict(title="Wh/j", gridcolor=grid_c, color=font_c),
         yaxis=dict(color=font_c),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         font=dict(color=font_c, size=11),
-        height=220,
-        margin=dict(t=44, b=36, l=16, r=70),
+        height=220, margin=dict(t=44, b=36, l=16, r=80),
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_system_table(results: dict):
+def render_system_table(results: dict, ACCENT: str = "#7B9ED4"):
     r = results
     data = {
-        "Composant": [
-            "☀️ Panneaux PV", "⚙️ Régulateur",
-            "🔋 Batterie", "🔌 Onduleur", "💡 Charges",
-        ],
+        "Composant": ["☀️ Panneaux PV", "⚙️ Régulateur", "🔋 Batterie", "🔌 Onduleur", "💡 Charges"],
         "Valeur clé": [
             f"{r['pv']['peak_power']} Wc — {r['pv']['daily_energy']:.0f} Wh/j",
             f"Rdt {r['regulator']['efficiency']*100:.0f}% — Courant requis {r['regulator']['required_current']:.1f} A",
-            f"{r['battery']['total_ah']:.0f} Ah — {r['battery']['usable_wh']:.0f} Wh utiles — {r['battery']['autonomy']:.1f} j",
+            f"{r['battery']['total_ah']:.0f} Ah — {r['battery']['usable_wh']:.0f} Wh utiles — {r['battery']['autonomy']:.1f} j autonomie",
             f"Rdt {r['inverter']['efficiency']*100:.0f}% — Pertes {r['inverter']['energy_loss']:.0f} Wh/j",
             f"{r['load']['peak_power']:.0f} W pointe — {r['load']['daily_energy']:.0f} Wh/j",
         ],
@@ -298,23 +277,41 @@ def render_dashboard(results: dict, params: dict, dark_mode: bool = True,
 
     st.markdown(
         "<h2 style='text-align:center; font-size:20px; margin-bottom:18px;'>📊 Résultats de la simulation</h2>",
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
+    # ── Alertes ───────────────────────────────────────────────────────────────
     render_alerts(results["alerts"])
     st.divider()
 
-    st.markdown(f"<p style='font-size:11px; font-weight:600; color:{TEXT2}; letter-spacing:0.06em; margin-bottom:8px;'>INDICATEURS CLÉS</p>", unsafe_allow_html=True)
-    render_kpis(results, ACCENT=ACCENT)
+    # ── KPIs + Jauge couverture ────────────────────────────────────────────────
+    st.markdown(f"<p style='font-size:10px;font-weight:700;letter-spacing:0.08em;color:{TEXT2};text-transform:uppercase;margin-bottom:10px;'>INDICATEURS CLÉS</p>",
+                unsafe_allow_html=True)
+
+    col_kpis, col_gauge = st.columns([3, 1.2])
+    with col_kpis:
+        render_kpis(results, ACCENT=ACCENT, TEXT2=TEXT2)
+    with col_gauge:
+        fig_gauge = render_coverage_gauge(results["coverage"], dark_mode, TEXT2)
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
     st.divider()
 
-    st.markdown(f"<p style='font-size:11px; font-weight:600; color:{TEXT2}; letter-spacing:0.06em; margin-bottom:4px;'>PROFIL ÉNERGÉTIQUE 24H</p>", unsafe_allow_html=True)
+    # ── Graphe 24h ────────────────────────────────────────────────────────────
+    st.markdown(f"<p style='font-size:10px;font-weight:700;letter-spacing:0.08em;color:{TEXT2};text-transform:uppercase;margin-bottom:4px;'>PROFIL ÉNERGÉTIQUE 24H</p>",
+                unsafe_allow_html=True)
     render_energy_24h(results, dark_mode=dark_mode)
     st.divider()
 
-    st.markdown(f"<p style='font-size:11px; font-weight:600; color:{TEXT2}; letter-spacing:0.06em; margin-bottom:4px;'>BILAN JOURNALIER</p>", unsafe_allow_html=True)
-    render_balance_bars(results, dark_mode=dark_mode)
-    st.divider()
+    # ── Bilan barres + tableau côte à côte ───────────────────────────────────
+    col_bal, col_tbl = st.columns([1.4, 1])
 
-    st.markdown(f"<p style='font-size:11px; font-weight:600; color:{TEXT2}; letter-spacing:0.06em; margin-bottom:8px;'>ÉTAT DES COMPOSANTS</p>", unsafe_allow_html=True)
-    render_system_table(results)
+    with col_bal:
+        st.markdown(f"<p style='font-size:10px;font-weight:700;letter-spacing:0.08em;color:{TEXT2};text-transform:uppercase;margin-bottom:4px;'>BILAN JOURNALIER</p>",
+                    unsafe_allow_html=True)
+        render_balance_bars(results, dark_mode=dark_mode)
+
+    with col_tbl:
+        st.markdown(f"<p style='font-size:10px;font-weight:700;letter-spacing:0.08em;color:{TEXT2};text-transform:uppercase;margin-bottom:8px;'>ÉTAT DES COMPOSANTS</p>",
+                    unsafe_allow_html=True)
+        render_system_table(results, ACCENT=ACCENT)
