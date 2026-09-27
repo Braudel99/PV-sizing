@@ -77,12 +77,12 @@ html, body, .stApp, [class*="css"] {{
 .block-container {{
     max-width: 900px !important;
     margin: 0 auto !important;
-    padding-top: 0.6rem !important;
+    padding-top: 1.6rem !important;
     padding-left: 2rem !important;
     padding-right: 2rem !important;
 }}
 
-/* ── Bandeau Streamlit par défaut (vide depuis le retrait du header) ── */
+/* ── Bandeau Streamlit par défaut ── */
 header[data-testid="stHeader"] {{
     height: 2.2rem !important;
     background: transparent !important;
@@ -244,16 +244,30 @@ def params_hash() -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# BARRE SUPÉRIEURE (toggle thème uniquement)
+# HEADER
 # ═══════════════════════════════════════════════════════════════════════════════
-_, col_thm = st.columns([8, 2])
+_, col_hdr, col_thm = st.columns([0.5, 8, 2])
+
+with col_hdr:
+    st.markdown(f"""
+    <div style="text-align:center; padding:8px 0 6px 0;">
+        <div style="font-size:46px; line-height:1; margin-bottom:6px;">⚡</div>
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:30px;
+                    font-weight:700; letter-spacing:0.12em; color:{TEXT}; margin-bottom:4px;">
+            PV SIZING
+        </div>
+        <div style="font-size:12px; color:{TEXT2}; letter-spacing:0.02em;">
+            Plateforme de dimensionnement de systèmes photovoltaïques autonomes
+        </div>
+    </div>""", unsafe_allow_html=True)
 
 with col_thm:
+    st.markdown("<div style='height:34px'></div>", unsafe_allow_html=True)
     if st.button(f"{ICON_MODE}  {LBL_MODE}", key="toggle_theme"):
         st.session_state.dark_mode = not st.session_state.dark_mode
         st.rerun()
 
-st.markdown(f"<hr style='border-color:{HR}; margin:2px 0 20px 0;'>", unsafe_allow_html=True)
+st.markdown(f"<hr style='border-color:{HR}; margin:14px 0 28px 0;'>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
