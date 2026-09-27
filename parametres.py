@@ -1,10 +1,6 @@
-# parametres.py — Panneau de paramétrage  (v1.3)
+# parametres.py — Panneau de paramétrage  (v1.4)
 import streamlit as st
-from data import (
-    PV_CATALOG, BATTERY_CATALOG, REGULATOR_CATALOG, INVERTER_CATALOG,
-    DEFAULT_LOADS, PSH_DEFAULT,
-    batteries_for_voltage, inverters_for_voltage,
-)
+from data import PV_CATALOG, DEFAULT_LOADS, PSH_DEFAULT
 from engines import total_load_power, total_load_daily_energy
 
 
@@ -14,10 +10,7 @@ def init_session_state():
         "pv_model":       "Mono 100 Wc",
         "pv_technology":  "Monocristallin",
         "psh":            PSH_DEFAULT,
-        "bat_model":      "12V — 100 Ah AGM",
         "autonomy_days":  1,
-        "reg_model":      "[MPPT] 20A — 100V",
-        "inv_model":      "12V —  500 W (Onde pure)",
         "loads":          [dict(l) for l in DEFAULT_LOADS],
     }
     for k, v in defaults.items():
@@ -28,24 +21,13 @@ def init_session_state():
 def get_params() -> dict:
     return {
         "panel":          PV_CATALOG.get(st.session_state.pv_model),
+        "pv_model_name":  st.session_state.pv_model,
+        "pv_technology":  st.session_state.pv_technology,
         "psh":            st.session_state.psh,
-        "battery":        BATTERY_CATALOG.get(st.session_state.bat_model),
         "system_voltage": st.session_state.system_voltage,
         "autonomy_days":  st.session_state.autonomy_days,
-        "regulator":      REGULATOR_CATALOG.get(st.session_state.reg_model),
-        "inverter":       INVERTER_CATALOG.get(st.session_state.inv_model),
         "loads":          st.session_state.loads,
     }
-
-
-def _ensure_compatible_models():
-    v        = st.session_state.system_voltage
-    bat_opts = list(batteries_for_voltage(v).keys())
-    inv_opts = list(inverters_for_voltage(v).keys())
-    if st.session_state.bat_model not in bat_opts and bat_opts:
-        st.session_state.bat_model = bat_opts[0]
-    if st.session_state.inv_model not in inv_opts and inv_opts:
-        st.session_state.inv_model = inv_opts[0]
 
 
 def _section_label(text: str, TEXT2: str):
@@ -93,16 +75,15 @@ def render_parametres(TEXT="#CDD1DC", TEXT2="#7A8299", ACCENT="#7B9ED4",
             key="sel_sysv",
             format_func=lambda x: f"{x} V",
             label_visibility="collapsed",
-            help="Ce choix verrouille les batteries et onduleurs compatibles.",
+            help="Ce choix détermine automatiquement les batteries et onduleurs compatibles.",
         )
         if new_v != st.session_state.system_voltage:
             st.session_state.system_voltage = new_v
-            _ensure_compatible_models()
             st.rerun()
     with col_v2:
         st.markdown(
             f"<span style='font-size:12px;color:{ACCENT};font-weight:600;'>"
-            f"🔒 Batteries et onduleurs filtrés sur {st.session_state.system_voltage} V"
+            f"🔒 Batterie, régulateur et onduleur seront choisis pour {st.session_state.system_voltage} V"
             f"</span>", unsafe_allow_html=True,
         )
 
@@ -229,119 +210,20 @@ def render_parametres(TEXT="#CDD1DC", TEXT2="#7A8299", ACCENT="#7B9ED4",
             help="Afrique de l'Ouest : 4–6 h · Europe : 2.5–4 h · Désert : 6–9 h",
         )
 
-    # ════════════════════════════════════════════════════════════════════════
-    # 3.  BATTERIES
-    # ════════════════════════════════════════════════════════════════════════
-    with st.expander("🔋  Batteries", expanded=True):
-        v        = st.session_state.system_voltage
-        bat_opts = list(batteries_for_voltage(v).keys())
-        _section_label(f"Batteries {v} V uniquement", TEXT2)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.session_state.bat_model = st.selectbox(
-                "Modèle", options=bat_opts,
-                index=bat_opts.index(st.session_state.bat_model) if st.session_state.bat_model in bat_opts else 0,
-                key="sel_bat_model",
-            )
-            bat = BATTERY_CATALOG[st.session_state.bat_model]
-            st.caption(f"Techno : {bat['technology']} · DoD : {int(bat['dod']*100)}% · Cycles : {bat['cycles']}")
-
-        with col2:
-            bat = BATTERY_CATALOG[st.session_state.bat_model]
-            st.markdown(
-                f"<div style='background:rgba(123,158,212,0.07);border:1px solid rgba(123,158,212,0.18);"
-                f"border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;'>"
-                f"Le nombre de batteries est calculé automatiquement lors du lancement de la "
-                f"simulation, à partir de l'énergie journalière, de l'autonomie souhaitée et de "
-                f"la capacité utile de ce modèle."
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
+        # ── Autonomie batterie souhaitée ───────────────────────────────────────
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         st.session_state.autonomy_days = st.slider(
-            "⏳ Autonomie souhaitée",
+            "⏳ Autonomie batterie souhaitée",
             min_value=1, max_value=7, value=st.session_state.autonomy_days,
             key="sl_auto", format="%d jour(s)",
             help="1 j = usage normal · 3 j+ = zone souvent nuageuse",
         )
 
-    # ════════════════════════════════════════════════════════════════════════
-    # 4.  RÉGULATEUR
-    # ════════════════════════════════════════════════════════════════════════
-    with st.expander("⚡  Régulateur de charge", expanded=True):
         st.markdown(
-            f"<div style='font-size:12px;color:{TEXT2};margin-bottom:10px;'>"
-            f"Choisissez un modèle de régulateur ; sa compatibilité (courant/tension) avec le "
-            f"champ PV calculé, ainsi que le montage retenu (série/parallèle), seront vérifiés "
-            f"lors du lancement de la simulation."
-            f"</div>", unsafe_allow_html=True)
-
-        reg_keys = list(REGULATOR_CATALOG.keys())
-        col1, col2 = st.columns(2)
-        with col1:
-            st.session_state.reg_model = st.selectbox(
-                "Modèle de régulateur",
-                options=reg_keys,
-                index=reg_keys.index(st.session_state.reg_model) if st.session_state.reg_model in reg_keys else 0,
-                key="sel_reg",
-            )
-
-        with col2:
-            reg = REGULATOR_CATALOG[st.session_state.reg_model]
-            st.markdown(
-                f"<div style='background:rgba(123,158,212,0.07);border-radius:8px;"
-                f"padding:10px 12px;font-size:12px;line-height:1.9;'>"
-                f"<b>{reg['type']}</b> · Rdt {int(reg['efficiency']*100)} %<br>"
-                f"Courant max : {reg['current_max']} A<br>"
-                f"Tension max : {reg['voltage_max']} V"
-                f"</div>", unsafe_allow_html=True)
-
-    # ════════════════════════════════════════════════════════════════════════
-    # 5.  ONDULEUR  — filtré par tension système + puissance de charge
-    # ════════════════════════════════════════════════════════════════════════
-    with st.expander("🔌  Onduleur", expanded=True):
-        v        = st.session_state.system_voltage
-        inv_opts = list(inverters_for_voltage(v).keys())
-        peak_load = total_load_power(st.session_state.loads)
-
-        _section_label(f"Onduleurs {v} V DC uniquement", TEXT2)
-        st.markdown(
-            f"<div style='font-size:12px;color:{TEXT2};margin-bottom:10px;'>"
-            f"Puissance de charge totale : <b style='color:{ACCENT}'>{peak_load:.0f} W</b>"
-            f"</div>", unsafe_allow_html=True)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            def fmt_inv(k):
-                inv = INVERTER_CATALOG[k]
-                ok  = "✅" if peak_load <= inv["power"] else "⛔"
-                return f"{ok} {k}"
-
-            cur_inv = st.session_state.inv_model
-            if cur_inv not in inv_opts:
-                cur_inv = inv_opts[0]
-                st.session_state.inv_model = cur_inv
-
-            chosen_inv_fmt = st.selectbox(
-                "Modèle d'onduleur",
-                options=[fmt_inv(k) for k in inv_opts],
-                index=inv_opts.index(cur_inv),
-                key="sel_inv",
-                help="✅ = suffisant pour votre charge · ⛔ = sous-dimensionné",
-            )
-            chosen_inv_key = inv_opts[[fmt_inv(k) for k in inv_opts].index(chosen_inv_fmt)]
-            st.session_state.inv_model = chosen_inv_key
-
-        with col2:
-            inv     = INVERTER_CATALOG[st.session_state.inv_model]
-            inv_ok  = peak_load <= inv["power"]
-            ci      = ACCENT if inv_ok else "#C0504A"
-            st.markdown(
-                f"<div style='background:rgba(123,158,212,0.07);border-radius:8px;"
-                f"padding:10px 12px;font-size:12px;line-height:1.9;'>"
-                f"<b>{inv['power']} W</b> nominal · Crête {inv['power_peak']} W<br>"
-                f"DC {inv['input_v']} V · Onde {inv['wave']} · Rdt {int(inv['efficiency']*100)} %<br>"
-                f"<span style='color:{ci};font-weight:600;'>"
-                f"{'✓ OK' if inv_ok else '⚠ Insuffisant'} — charge {peak_load:.0f} W"
-                f"</span></div>", unsafe_allow_html=True)
+            f"<div style='background:rgba(123,158,212,0.07);border:1px solid rgba(123,158,212,0.18);"
+            f"border-radius:8px;padding:10px 14px;font-size:12px;margin-top:8px;line-height:1.7;'>"
+            f"Batterie, régulateur et onduleur sont choisis et dimensionnés automatiquement "
+            f"lors du lancement de la simulation — retrouvez-les dans les résultats."
+            f"</div>",
+            unsafe_allow_html=True,
+        )

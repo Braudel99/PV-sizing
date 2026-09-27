@@ -52,7 +52,7 @@ def render_kpis(results: dict, ACCENT: str = "#7B9ED4", TEXT2: str = "#7A8299"):
     )
 
 
-def render_recommended_config(results: dict, ACCENT: str = "#7B9ED4", TEXT2: str = "#7A8299"):
+def render_recommended_config(results: dict, params: dict, ACCENT: str = "#7B9ED4", TEXT2: str = "#7A8299"):
     """Configuration calculée automatiquement : nombre de panneaux, montage, nombre de batteries."""
     pv_count   = results["pv"].get("count", 0)
     wiring     = results["pv"].get("wiring", "parallel")
@@ -63,6 +63,24 @@ def render_recommended_config(results: dict, ACCENT: str = "#7B9ED4", TEXT2: str
     c1.metric("☀️ Panneaux requis", f"{pv_count}", f"{results['pv']['peak_power']} Wc au total")
     c2.metric("🔌 Montage panneaux", wiring_lbl)
     c3.metric("🔋 Batteries requises", f"{bat_count}", f"{results['battery']['total_wh']:.0f} Wh au total")
+
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    pv_model  = params.get("pv_model_name", "—")
+    bat_model = results["battery"].get("model", "—")
+    reg_model = results["regulator"].get("model", "—")
+    inv_model = results["inverter"].get("model", "—")
+
+    st.markdown(
+        f"<div style='background:rgba(123,158,212,0.07);border:1px solid rgba(123,158,212,0.18);"
+        f"border-radius:8px;padding:12px 16px;font-size:12px;line-height:2.0;'>"
+        f"<b>Composants retenus automatiquement</b><br>"
+        f"☀️ Panneau : <b>{pv_model}</b> × {pv_count} ({wiring_lbl})<br>"
+        f"🔋 Batterie : <b>{bat_model}</b> × {bat_count}<br>"
+        f"⚡ Régulateur : <b>{reg_model}</b><br>"
+        f"🔌 Onduleur : <b>{inv_model}</b>"
+        f"</div>", unsafe_allow_html=True,
+    )
 
 
 def render_coverage_gauge(coverage: float, dark_mode: bool, TEXT2: str):
@@ -261,11 +279,19 @@ def render_balance_bars(results: dict, dark_mode: bool = True):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_system_table(results: dict, ACCENT: str = "#7B9ED4"):
+def render_system_table(results: dict, params: dict, ACCENT: str = "#7B9ED4"):
     r = results
     wiring_lbl = "série" if r["pv"].get("wiring") == "series" else "parallèle"
+    pv_model   = params.get("pv_model_name", "—")
     data = {
         "Composant": ["☀️ Panneaux PV", "⚙️ Régulateur", "🔋 Batterie", "🔌 Onduleur", "💡 Charges"],
+        "Modèle": [
+            pv_model,
+            r["regulator"].get("model", "—"),
+            r["battery"].get("model", "—"),
+            r["inverter"].get("model", "—"),
+            "—",
+        ],
         "Valeur clé": [
             f"{r['pv'].get('count', 0)} panneau(x) montage {wiring_lbl} — {r['pv']['peak_power']} Wc — {r['pv']['daily_energy']:.0f} Wh/j",
             f"Rdt {r['regulator']['efficiency']*100:.0f}% — Courant requis {r['regulator']['required_current']:.1f} A",
@@ -301,7 +327,7 @@ def render_dashboard(results: dict, params: dict, dark_mode: bool = True,
     # ── Configuration calculée automatiquement ───────────────────────────────
     st.markdown(f"<p style='font-size:10px;font-weight:700;letter-spacing:0.08em;color:{TEXT2};text-transform:uppercase;margin-bottom:10px;'>CONFIGURATION CALCULÉE</p>",
                 unsafe_allow_html=True)
-    render_recommended_config(results, ACCENT=ACCENT, TEXT2=TEXT2)
+    render_recommended_config(results, params, ACCENT=ACCENT, TEXT2=TEXT2)
     st.divider()
 
     # ── KPIs + Jauge couverture ────────────────────────────────────────────────
@@ -334,4 +360,4 @@ def render_dashboard(results: dict, params: dict, dark_mode: bool = True,
     with col_tbl:
         st.markdown(f"<p style='font-size:10px;font-weight:700;letter-spacing:0.08em;color:{TEXT2};text-transform:uppercase;margin-bottom:8px;'>ÉTAT DES COMPOSANTS</p>",
                     unsafe_allow_html=True)
-        render_system_table(results, ACCENT=ACCENT)
+        render_system_table(results, params, ACCENT=ACCENT)

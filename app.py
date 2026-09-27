@@ -1,9 +1,11 @@
-# app.py — PV Sizing v1.2
+# app.py — PV Sizing v1.5
 import streamlit as st
 import hashlib, json
+from datetime import datetime
 from parametres import init_session_state, get_params, render_parametres
 from dashboard  import render_dashboard
 from engines    import run_sizing
+from reports    import generate_technical_pdf, generate_client_pdf
 
 st.set_page_config(
     page_title="PV Sizing — Dimensionnement solaire",
@@ -229,8 +231,7 @@ tbody tr:hover td {{ background:{THM_BG} !important; }}
 def params_hash() -> str:
     snap = {k: str(st.session_state.get(k)) for k in [
         "system_voltage","pv_model","pv_technology","psh",
-        "bat_model","autonomy_days","reg_model","inv_model",
-        "loads",
+        "autonomy_days","loads",
     ]}
     return hashlib.md5(json.dumps(snap, sort_keys=True).encode()).hexdigest()
 
@@ -293,6 +294,34 @@ if st.session_state.show_results:
     render_dashboard(results, params,
                      dark_mode=st.session_state.dark_mode,
                      TEXT=TEXT, TEXT2=TEXT2, ACCENT=ACCENT, CARD=CARD, BORDER=BORDER)
+
+    # ── Téléchargement des documents ──────────────────────────────────────────
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown(f"<p style='font-size:10px;font-weight:700;letter-spacing:0.08em;color:{TEXT2};"
+                f"text-transform:uppercase;margin-bottom:10px;'>DOCUMENTS À TÉLÉCHARGER</p>",
+                unsafe_allow_html=True)
+
+    _stamp      = datetime.now().strftime("%Y%m%d_%H%M")
+    technical_pdf = generate_technical_pdf(results, params)
+    client_pdf    = generate_client_pdf(results, params)
+
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            "📄  Fiche technique (PDF)",
+            data=technical_pdf,
+            file_name=f"pv_sizing_fiche_technique_{_stamp}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    with col_dl2:
+        st.download_button(
+            "📑  Fiche de dimensionnement client (PDF)",
+            data=client_pdf,
+            file_name=f"pv_sizing_dimensionnement_client_{_stamp}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

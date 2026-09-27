@@ -1,7 +1,10 @@
-# engines.py — Moteurs de calcul du dimensionnement PV  (v1.4)
+# engines.py — Moteurs de calcul du dimensionnement PV  (v1.5)
 import math
 import numpy as np
-from data import PERFORMANCE_RATIO
+from data import (
+    PERFORMANCE_RATIO, REGULATOR_CATALOG,
+    batteries_for_voltage, inverters_for_voltage, regulators_for_pv,
+)
 
 
 # ── 1. Bilan de charge ───────────────────────────────────────────────────────
@@ -233,7 +236,7 @@ def size_pv_count(daily_energy_required: float, panel: dict, psh: float) -> int:
     return max(1, math.ceil(daily_energy_required / per_panel_daily))
 
 
-# ── 7b. Dimensionnement automatique du parc batteries ────────────────────────
+# ── 7b. Sélection automatique du parc batteries ──────────────────────────────
 def size_battery_count(daily_energy: float, autonomy_days: int,
                         battery: dict, system_voltage: int) -> int:
     """
@@ -248,35 +251,77 @@ def size_battery_count(daily_energy: float, autonomy_days: int,
     return max(1, math.ceil(required_wh / usable_per_battery))
 
 
-# ── 7c. Choix automatique du montage (série / parallèle) ─────────────────────
-def choose_wiring(panel: dict, count: int, regulator: dict) -> str:
+def choose_battery_bank(daily_energy: float, autonomy_days: int, system_voltage: int):
     """
-    Choisit le montage compatible avec le régulateur sélectionné.
-    Parallèle par défaut ; bascule en série uniquement si nécessaire
-    pour respecter les limites courant/tension du régulateur.
+    Choisit automatiquement, parmi les modèles compatibles avec la tension système,
+    celui qui minimise le nombre de batteries nécessaires (meilleure capacité utile).
+    Retourne (clé_modèle, dict_modèle, nombre).
     """
-    if not panel or not regulator:
-        return "parallel"
+    candidates = batteries_for_voltage(system_voltage)
+    if not candidates:
+        return None, None, 0
 
-    par = calc_pv_wiring(panel, count, "parallel")
-    ser = calc_pv_wiring(panel, count, "series")
+    best_key, best_bat, best_count = None, None, None
+    for key, bat in candidates.items():
+        count = size_battery_count(daily_energy, autonomy_days, bat, system_voltage)
+        if best_count is None or count < best_count:
+            best_key, best_bat, best_count = key, bat, count
 
-    par_ok = calc_regulator(regulator, par["isc"], par["voc"])["compatible"]
-    ser_ok = calc_regulator(regulator, ser["isc"], ser["voc"])["compatible"]
+    return best_key, best_bat, best_count
 
-    if par_ok:
-        return "parallel"
-    if ser_ok:
-        return "series"
-    return "parallel"   # aucun des deux ne convient — signalé par les alertes régulateur
+
+# ── 7c. Choix automatique du montage PV + régulateur ─────────────────────────
+def choose_regulator_and_wiring(panel: dict, count: int):
+    """
+    Choisit automatiquement le montage (série/parallèle) et le régulateur le plus
+    économique (calibre le plus proche du besoin) compatible avec le champ PV.
+    Parallèle est privilégié par défaut ; bascule en série si nécessaire.
+    Retourne (wiring, clé_régulateur, dict_régulateur).
+    """
+    if not panel or count <= 0:
+        fallback_key = min(REGULATOR_CATALOG, key=lambda k: REGULATOR_CATALOG[k]["current_max"])
+        return "parallel", fallback_key, REGULATOR_CATALOG[fallback_key]
+
+    for wiring in ("parallel", "series"):
+        w      = calc_pv_wiring(panel, count, wiring)
+        regs   = regulators_for_pv(w["isc"], w["voc"])
+        compat = {k: v for k, v in regs.items() if v["compatible"]}
+        if compat:
+            key = min(compat, key=lambda k: (compat[k]["current_max"], compat[k]["voltage_max"]))
+            return wiring, key, REGULATOR_CATALOG[key]
+
+    # Aucun régulateur compatible : on retient le plus gros calibre disponible
+    # (l'insuffisance sera signalée par les alertes du régulateur).
+    fallback_key = max(REGULATOR_CATALOG,
+                       key=lambda k: (REGULATOR_CATALOG[k]["current_max"], REGULATOR_CATALOG[k]["voltage_max"]))
+    return "parallel", fallback_key, REGULATOR_CATALOG[fallback_key]
+
+
+# ── 7d. Choix automatique de l'onduleur ──────────────────────────────────────
+def choose_inverter(peak_load: float, system_voltage: int):
+    """
+    Choisit automatiquement, parmi les onduleurs compatibles avec la tension
+    système, le plus petit modèle suffisant pour la puissance de pointe.
+    Retourne (clé_modèle, dict_modèle).
+    """
+    candidates = inverters_for_voltage(system_voltage)
+    if not candidates:
+        return None, None
+
+    compat = {k: v for k, v in candidates.items() if v["power"] >= peak_load}
+    if compat:
+        key = min(compat, key=lambda k: compat[k]["power"])
+    else:
+        # Aucun modèle suffisant : on retient le plus puissant disponible
+        # (l'insuffisance sera signalée par les alertes de l'onduleur).
+        key = max(candidates, key=lambda k: candidates[k]["power"])
+
+    return key, candidates[key]
 
 
 # ── 8. Orchestration complète ─────────────────────────────────────────────────
 def run_sizing(params: dict) -> dict:
     panel     = params["panel"]
-    battery   = params["battery"]
-    regulator = params["regulator"]
-    inverter  = params["inverter"]
     loads     = params["loads"]
     psh       = params["psh"]
     sys_v     = params["system_voltage"]
@@ -284,19 +329,24 @@ def run_sizing(params: dict) -> dict:
 
     load_r = calc_load(loads)
 
-    # ── Dimensionnement automatique ───────────────────────────────────────────
-    pv_count  = size_pv_count(load_r["daily_energy"], panel, psh)
-    pv_wiring = choose_wiring(panel, pv_count, regulator)
-    pv_r      = calc_pv(panel, pv_count, psh, pv_wiring)
-    pv_r["count"] = pv_count
+    # ── Dimensionnement + sélection automatique de tous les composants ────────
+    pv_count             = size_pv_count(load_r["daily_energy"], panel, psh)
+    pv_wiring, reg_key, regulator = choose_regulator_and_wiring(panel, pv_count)
+    pv_r                 = calc_pv(panel, pv_count, psh, pv_wiring)
+    pv_r["count"]        = pv_count
 
-    bat_count = size_battery_count(load_r["daily_energy"], auto_days, battery, sys_v)
-    bat_r     = calc_battery(battery, bat_count, sys_v, load_r["daily_energy"], auto_days)
+    bat_key, battery, bat_count = choose_battery_bank(load_r["daily_energy"], auto_days, sys_v)
+    bat_r          = calc_battery(battery, bat_count, sys_v, load_r["daily_energy"], auto_days)
     bat_r["count"] = bat_count
+    bat_r["model"] = bat_key
+
+    inv_key, inverter = choose_inverter(load_r["peak_power"], sys_v)
 
     # Passage des bonnes grandeurs au régulateur selon câblage
     reg_r  = calc_regulator(regulator, pv_r["isc"], pv_r["voc"])
+    reg_r["model"] = reg_key
     inv_r  = calc_inverter(inverter, load_r["peak_power"], load_r["daily_energy"])
+    inv_r["model"] = inv_key
 
     coverage = (pv_r["daily_energy"] / load_r["daily_energy"] * 100
                 if load_r["daily_energy"] > 0 else 0)
