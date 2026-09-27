@@ -77,10 +77,17 @@ html, body, .stApp, [class*="css"] {{
 .block-container {{
     max-width: 900px !important;
     margin: 0 auto !important;
-    padding-top: 1.6rem !important;
+    padding-top: 0.6rem !important;
     padding-left: 2rem !important;
     padding-right: 2rem !important;
 }}
+
+/* ── Bandeau Streamlit par défaut (vide depuis le retrait du header) ── */
+header[data-testid="stHeader"] {{
+    height: 2.2rem !important;
+    background: transparent !important;
+}}
+div[data-testid="stDecoration"] {{ display: none !important; }}
 
 /* Typographie */
 h1, h2, h3 {{ font-family:'IBM Plex Mono',monospace !important; color:{TEXT} !important; }}
@@ -246,7 +253,7 @@ with col_thm:
         st.session_state.dark_mode = not st.session_state.dark_mode
         st.rerun()
 
-st.markdown(f"<hr style='border-color:{HR}; margin:8px 0 24px 0;'>", unsafe_allow_html=True)
+st.markdown(f"<hr style='border-color:{HR}; margin:2px 0 20px 0;'>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
