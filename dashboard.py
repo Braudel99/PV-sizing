@@ -52,6 +52,19 @@ def render_kpis(results: dict, ACCENT: str = "#7B9ED4", TEXT2: str = "#7A8299"):
     )
 
 
+def render_recommended_config(results: dict, ACCENT: str = "#7B9ED4", TEXT2: str = "#7A8299"):
+    """Configuration calculée automatiquement : nombre de panneaux, montage, nombre de batteries."""
+    pv_count   = results["pv"].get("count", 0)
+    wiring     = results["pv"].get("wiring", "parallel")
+    wiring_lbl = "🔗 Série" if wiring == "series" else "⚡ Parallèle"
+    bat_count  = results["battery"].get("count", 0)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("☀️ Panneaux requis", f"{pv_count}", f"{results['pv']['peak_power']} Wc au total")
+    c2.metric("🔌 Montage panneaux", wiring_lbl)
+    c3.metric("🔋 Batteries requises", f"{bat_count}", f"{results['battery']['total_wh']:.0f} Wh au total")
+
+
 def render_coverage_gauge(coverage: float, dark_mode: bool, TEXT2: str):
     """Jauge circulaire du taux de couverture."""
     cov_clamped = min(coverage, 150)
@@ -250,12 +263,13 @@ def render_balance_bars(results: dict, dark_mode: bool = True):
 
 def render_system_table(results: dict, ACCENT: str = "#7B9ED4"):
     r = results
+    wiring_lbl = "série" if r["pv"].get("wiring") == "series" else "parallèle"
     data = {
         "Composant": ["☀️ Panneaux PV", "⚙️ Régulateur", "🔋 Batterie", "🔌 Onduleur", "💡 Charges"],
         "Valeur clé": [
-            f"{r['pv']['peak_power']} Wc — {r['pv']['daily_energy']:.0f} Wh/j",
+            f"{r['pv'].get('count', 0)} panneau(x) montage {wiring_lbl} — {r['pv']['peak_power']} Wc — {r['pv']['daily_energy']:.0f} Wh/j",
             f"Rdt {r['regulator']['efficiency']*100:.0f}% — Courant requis {r['regulator']['required_current']:.1f} A",
-            f"{r['battery']['total_ah']:.0f} Ah — {r['battery']['usable_wh']:.0f} Wh utiles — {r['battery']['autonomy']:.1f} j autonomie",
+            f"{r['battery'].get('count', 0)} batterie(s) — {r['battery']['total_ah']:.0f} Ah — {r['battery']['usable_wh']:.0f} Wh utiles — {r['battery']['autonomy']:.1f} j autonomie",
             f"Rdt {r['inverter']['efficiency']*100:.0f}% — Pertes {r['inverter']['energy_loss']:.0f} Wh/j",
             f"{r['load']['peak_power']:.0f} W pointe — {r['load']['daily_energy']:.0f} Wh/j",
         ],
@@ -282,6 +296,12 @@ def render_dashboard(results: dict, params: dict, dark_mode: bool = True,
 
     # ── Alertes ───────────────────────────────────────────────────────────────
     render_alerts(results["alerts"])
+    st.divider()
+
+    # ── Configuration calculée automatiquement ───────────────────────────────
+    st.markdown(f"<p style='font-size:10px;font-weight:700;letter-spacing:0.08em;color:{TEXT2};text-transform:uppercase;margin-bottom:10px;'>CONFIGURATION CALCULÉE</p>",
+                unsafe_allow_html=True)
+    render_recommended_config(results, ACCENT=ACCENT, TEXT2=TEXT2)
     st.divider()
 
     # ── KPIs + Jauge couverture ────────────────────────────────────────────────

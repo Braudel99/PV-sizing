@@ -65,9 +65,9 @@ INVERTER_CATALOG = {
 
 # ── Charges par défaut ────────────────────────────────────────────────────────
 DEFAULT_LOADS = [
-    {"name": "Éclairage LED",      "power": 20, "start_h": 18, "end_h": 23},
-    {"name": "Ventilateur",        "power": 50, "start_h": 8,  "end_h": 20},
-    {"name": "Chargeur téléphone", "power": 10, "start_h": 19, "end_h": 22},
+    {"name": "Éclairage LED",      "power": 20, "qty": 3, "start_h": 18, "end_h": 23},
+    {"name": "Ventilateur",        "power": 50, "qty": 1, "start_h": 8,  "end_h": 20},
+    {"name": "Chargeur téléphone", "power": 10, "qty": 1, "start_h": 19, "end_h": 22},
 ]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -228,38 +228,24 @@ tbody tr:hover td {{ background:{THM_BG} !important; }}
 # ── Hash des paramètres ───────────────────────────────────────────────────────
 def params_hash() -> str:
     snap = {k: str(st.session_state.get(k)) for k in [
-        "system_voltage","pv_model","pv_technology","pv_count","psh",
-        "bat_model","bat_count","autonomy_days","reg_model","inv_model",
+        "system_voltage","pv_model","pv_technology","psh",
+        "bat_model","autonomy_days","reg_model","inv_model",
         "loads",
     ]}
     return hashlib.md5(json.dumps(snap, sort_keys=True).encode()).hexdigest()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# HEADER
+# BARRE SUPÉRIEURE (toggle thème uniquement)
 # ═══════════════════════════════════════════════════════════════════════════════
-_, col_hdr, col_thm = st.columns([0.5, 8, 2])
-
-with col_hdr:
-    st.markdown(f"""
-    <div style="text-align:center; padding:8px 0 6px 0;">
-        <div style="font-size:46px; line-height:1; margin-bottom:6px;">⚡</div>
-        <div style="font-family:'IBM Plex Mono',monospace; font-size:30px;
-                    font-weight:700; letter-spacing:0.12em; color:{TEXT}; margin-bottom:4px;">
-            PV SIZING
-        </div>
-        <div style="font-size:12px; color:{TEXT2}; letter-spacing:0.02em;">
-            Plateforme de dimensionnement de systèmes photovoltaïques autonomes
-        </div>
-    </div>""", unsafe_allow_html=True)
+_, col_thm = st.columns([8, 2])
 
 with col_thm:
-    st.markdown("<div style='height:34px'></div>", unsafe_allow_html=True)
     if st.button(f"{ICON_MODE}  {LBL_MODE}", key="toggle_theme"):
         st.session_state.dark_mode = not st.session_state.dark_mode
         st.rerun()
 
-st.markdown(f"<hr style='border-color:{HR}; margin:14px 0 28px 0;'>", unsafe_allow_html=True)
+st.markdown(f"<hr style='border-color:{HR}; margin:8px 0 24px 0;'>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

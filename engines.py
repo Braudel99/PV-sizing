@@ -1,4 +1,5 @@
-# engines.py — Moteurs de calcul du dimensionnement PV  (v1.3)
+# engines.py — Moteurs de calcul du dimensionnement PV  (v1.4)
+import math
 import numpy as np
 from data import PERFORMANCE_RATIO
 
@@ -7,12 +8,14 @@ from data import PERFORMANCE_RATIO
 def calc_load(loads: list[dict]) -> dict:
     """
     Consommation journalière et profil horaire.
-    Chaque charge a start_h / end_h pour sa plage d'activité.
+    Chaque charge a une quantité (qty), une puissance unitaire (power)
+    et start_h / end_h pour sa plage d'activité.
     """
     hourly_load = np.zeros(24)
 
     for l in loads:
-        power   = float(l.get("power", 0))
+        qty     = int(l.get("qty", 1))
+        power   = float(l.get("power", 0)) * qty
         start_h = int(l.get("start_h", 6))
         end_h   = int(l.get("end_h", 22))
         if power <= 0:
@@ -29,13 +32,36 @@ def calc_load(loads: list[dict]) -> dict:
             hourly_load[h] += power    # Wh par heure active
 
     daily_energy = float(np.sum(hourly_load))
-    peak_power   = sum(float(l.get("power", 0)) for l in loads)
+    peak_power   = total_load_power(loads)
 
     return {
         "daily_energy":   daily_energy,
         "peak_power":     peak_power,
         "hourly_profile": hourly_load,
     }
+
+
+def total_load_power(loads: list[dict]) -> float:
+    """Puissance de pointe totale (W), quantité comprise."""
+    return sum(float(l.get("power", 0)) * int(l.get("qty", 1)) for l in loads)
+
+
+def total_load_daily_energy(loads: list[dict]) -> float:
+    """Énergie journalière totale (Wh/j), quantité comprise."""
+    total = 0.0
+    for l in loads:
+        qty     = int(l.get("qty", 1))
+        power   = float(l.get("power", 0)) * qty
+        start_h = int(l.get("start_h", 6))
+        end_h   = int(l.get("end_h", 22))
+        if end_h > start_h:
+            dur = end_h - start_h
+        elif end_h < start_h:
+            dur = 24 - start_h + end_h
+        else:
+            dur = 0
+        total += power * dur
+    return total
 
 
 # ── 2. Câblage du champ PV ───────────────────────────────────────────────────
@@ -193,7 +219,59 @@ def calc_inverter(inverter: dict, peak_power: float, daily_energy: float) -> dic
     }
 
 
-# ── 7. Orchestration complète ────────────────────────────────────────────────
+# ── 7a. Dimensionnement automatique du champ PV ──────────────────────────────
+def size_pv_count(daily_energy_required: float, panel: dict, psh: float) -> int:
+    """
+    Nombre de panneaux nécessaires pour couvrir le besoin énergétique journalier,
+    compte tenu de l'irradiation (PSH) et du coefficient de performance.
+    """
+    if not panel or psh <= 0 or daily_energy_required <= 0:
+        return 1
+    per_panel_daily = panel["power"] * psh * PERFORMANCE_RATIO
+    if per_panel_daily <= 0:
+        return 1
+    return max(1, math.ceil(daily_energy_required / per_panel_daily))
+
+
+# ── 7b. Dimensionnement automatique du parc batteries ────────────────────────
+def size_battery_count(daily_energy: float, autonomy_days: int,
+                        battery: dict, system_voltage: int) -> int:
+    """
+    Nombre de batteries nécessaires pour couvrir l'autonomie souhaitée.
+    """
+    if not battery or daily_energy <= 0:
+        return 1
+    required_wh        = daily_energy * autonomy_days
+    usable_per_battery  = battery["capacity"] * system_voltage * battery["dod"]
+    if usable_per_battery <= 0:
+        return 1
+    return max(1, math.ceil(required_wh / usable_per_battery))
+
+
+# ── 7c. Choix automatique du montage (série / parallèle) ─────────────────────
+def choose_wiring(panel: dict, count: int, regulator: dict) -> str:
+    """
+    Choisit le montage compatible avec le régulateur sélectionné.
+    Parallèle par défaut ; bascule en série uniquement si nécessaire
+    pour respecter les limites courant/tension du régulateur.
+    """
+    if not panel or not regulator:
+        return "parallel"
+
+    par = calc_pv_wiring(panel, count, "parallel")
+    ser = calc_pv_wiring(panel, count, "series")
+
+    par_ok = calc_regulator(regulator, par["isc"], par["voc"])["compatible"]
+    ser_ok = calc_regulator(regulator, ser["isc"], ser["voc"])["compatible"]
+
+    if par_ok:
+        return "parallel"
+    if ser_ok:
+        return "series"
+    return "parallel"   # aucun des deux ne convient — signalé par les alertes régulateur
+
+
+# ── 8. Orchestration complète ─────────────────────────────────────────────────
 def run_sizing(params: dict) -> dict:
     panel     = params["panel"]
     battery   = params["battery"]
@@ -201,15 +279,20 @@ def run_sizing(params: dict) -> dict:
     inverter  = params["inverter"]
     loads     = params["loads"]
     psh       = params["psh"]
-    pv_count  = params["pv_count"]
-    pv_wiring = params.get("pv_wiring", "parallel")
-    bat_count = params["bat_count"]
     sys_v     = params["system_voltage"]
     auto_days = params["autonomy_days"]
 
     load_r = calc_load(loads)
-    pv_r   = calc_pv(panel, pv_count, psh, pv_wiring)
-    bat_r  = calc_battery(battery, bat_count, sys_v, load_r["daily_energy"], auto_days)
+
+    # ── Dimensionnement automatique ───────────────────────────────────────────
+    pv_count  = size_pv_count(load_r["daily_energy"], panel, psh)
+    pv_wiring = choose_wiring(panel, pv_count, regulator)
+    pv_r      = calc_pv(panel, pv_count, psh, pv_wiring)
+    pv_r["count"] = pv_count
+
+    bat_count = size_battery_count(load_r["daily_energy"], auto_days, battery, sys_v)
+    bat_r     = calc_battery(battery, bat_count, sys_v, load_r["daily_energy"], auto_days)
+    bat_r["count"] = bat_count
 
     # Passage des bonnes grandeurs au régulateur selon câblage
     reg_r  = calc_regulator(regulator, pv_r["isc"], pv_r["voc"])
